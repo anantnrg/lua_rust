@@ -1,36 +1,111 @@
-use mlua::{Lua, Result, UserData, UserDataMethods};
-use std::process::Command;
+use mlua::{Lua, Result};
+use std::{
+	env::var,
+	fs::read_to_string,
+};
+use serde::{Deserialize, Serialize};
 
-// Define the userdata for Strata
-struct StrataState;
-
-impl UserData for StrataState {
-    fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("spawn", |_, this, cmd: String| Ok(this.spawn(cmd)));
-    }
+#[derive(Debug, Deserialize, Serialize)]
+struct Config {
+    autostart: Vec<Vec<String>>,
+    general: GeneralConfig,
+    decorations: DecorationsConfig,
+    tiling: TilingConfig,
+    animations: AnimationsConfig,
+    rules: RulesConfig,
+    bindings: Vec<BindingConfig>,
 }
 
-impl StrataState {
-    fn spawn(&self, cmd: String) {
-        Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .spawn()
-            .expect("Failed to execute the command");
-    }
+#[derive(Debug, Deserialize, Serialize)]
+struct GeneralConfig {
+    workspaces: u32,
+    gaps_in: u32,
+    gaps_out: u32,
+    kb_repeat: Vec<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DecorationsConfig {
+    border: BorderConfig,
+    window: WindowConfig,
+    blur: BlurConfig,
+    shadow: ShadowConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct BorderConfig {
+    width: u32,
+    active: String,
+    inactive: String,
+    radius: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct WindowConfig {
+    opacity: f32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct BlurConfig {
+    enabled: bool,
+    size: u32,
+    passes: u32,
+    optimize: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ShadowConfig {
+    enabled: bool,
+    size: u32,
+    blur: u32,
+    color: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct TilingConfig {
+    layout: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AnimationsConfig {
+    enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct RulesConfig {
+    workspaces: Vec<WorkspaceRuleConfig>,
+    floating: Vec<FloatingRuleConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct WorkspaceRuleConfig {
+    workspace: u32,
+    class_name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct FloatingRuleConfig {
+    class_name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct BindingConfig {
+    keys: Vec<String>,
+    cmd: String,
 }
 
 fn main() -> Result<()> {
     let lua = Lua::new();
+	let config_path =
+		format!("{}/.config/strata/strata.lua", var("HOME").expect("This should always be set!!!"));
+	let config_str = read_to_string(config_path).unwrap();
 
-    let strata = StrataState;
-    lua.globals().set("strata", lua.create_userdata(strata)?)?;
+    lua.load(&config_str).exec()?;
 
-    let lua_script = r#"
-        strata:spawn("echo Hello from Lua!")
-    "#;
+	let config: mlua::Table = lua.globals().get("config")?;
 
-    lua.load(lua_script).exec()?;
+	println!("{:#?}", config);
 
     Ok(())
 }
+
