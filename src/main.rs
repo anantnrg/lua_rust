@@ -6,7 +6,7 @@ use mlua::{
 	UserData,
 	Value,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::{
 	env::var,
 	fs::read_to_string,
@@ -111,6 +111,26 @@ impl StrataState {
 }
 
 impl UserData for StrataState {}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Config, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let lua_value = Value::deserialize(deserializer)?;
+        let lua = Lua::new();
+
+        // Convert LuaValue to LuaTable
+        let lua_table = match lua_value {
+            Value::Table(table) => table,
+            _ => return Err(D::Error::custom("Invalid Lua table format")),
+        };
+
+        // Convert LuaTable to Config using from_lua function
+        let config = lua.from_lua(lua_table, ())?;
+        Ok(config)
+    }
+}
 
 fn main() -> anyhow::Result<()> {
 	let lua = Lua::new();
