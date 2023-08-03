@@ -1,15 +1,106 @@
+use anyhow::Error;
 use mlua::{
 	prelude::*,
 	Lua,
-	Result,
 	Table,
 	UserData,
 	Value,
 };
+use serde::Deserialize;
 use std::{
 	env::var,
 	fs::read_to_string,
 };
+use serde_json;
+
+#[derive(Debug, Deserialize)]
+struct Config {
+	autostart: Vec<String>,
+	general: General,
+	decorations: Decorations,
+	tiling: Tiling,
+	animations: Animations,
+	rules: Rules,
+	bindings: Vec<Binding>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Binding {
+	keys: Vec<String>,
+	cmd: String, // Assuming the cmd is a string representing a function name
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct General {
+	workspaces: i32,
+	gaps_in: i32,
+	gaps_out: i32,
+	kb_repeat: Vec<i32>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Border {
+	width: i32,
+	active: String,
+	inactive: String,
+	radius: i32,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Window {
+	opacity: f32,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Blur {
+	enabled: bool,
+	size: i32,
+	passes: i32,
+	optimize: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Shadow {
+	enabled: bool,
+	size: i32,
+	blur: i32,
+	color: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Decorations {
+	border: Border,
+	window: Window,
+	blur: Blur,
+	shadow: Shadow,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Tiling {
+	layout: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Animations {
+	enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct WorkspacesRule {
+	workspace: i32,
+	class_name: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct FloatingRule {
+	class_name: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Rules {
+	workspaces: Vec<WorkspacesRule>,
+	floating: Vec<FloatingRule>,
+}
 
 struct StrataState;
 
@@ -29,13 +120,24 @@ fn main() -> anyhow::Result<()> {
 
 	let state_mod = get_or_create_module(&lua, "strata")?;
 
-	let spawn = lua.create_function(|_, _: ()| {
-		Ok(StrataState::spawn())
-	})?;
+	let spawn = lua.create_function(|_, _: ()| Ok(StrataState::spawn()))?;
 
 	state_mod.set("spawn", spawn)?;
 
 	lua.load(&config_str).exec()?;
+
+	let globals = lua.globals();
+	let config: LuaTable = globals.get("config")?;
+
+	let json_str = serde_json::to_string(&config).map_err(mlua::Error::external)?;
+    println!("{}", json_str);
+
+    // Deserialize JSON back into Config struct
+    let config: Config = serde_json::from_str(&json_str).map_err(mlua::Error::external)?;
+    println!("{:#?}", config);
+
+
+	println!("{:?}", config);
 
 	Ok(())
 }
