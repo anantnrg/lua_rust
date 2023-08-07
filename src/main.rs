@@ -6,12 +6,15 @@ use mlua::{
 	UserData,
 	Value,
 };
-use serde::{Deserialize, Deserializer};
+use serde::{
+	Deserialize,
+	Deserializer,
+};
+use serde_json;
 use std::{
 	env::var,
 	fs::read_to_string,
 };
-use serde_json;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -21,13 +24,46 @@ struct Config {
 	tiling: Tiling,
 	animations: Animations,
 	rules: Rules,
-	bindings: Vec<Binding>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct Binding {
-	keys: Vec<String>,
-	cmd: String, // Assuming the cmd is a string representing a function name
+#[derive(Debug, Deserialize)]
+struct Bindings<'lua> {
+	bindings: Vec<Binding<'lua>>,
+}
+
+#[derive(Debug, Clone)]
+struct Binding<'lua> {
+	keys: Vec<&'lua str>,
+	cmd: LuaFunction<'lua>,
+}
+
+impl<'lua> Deserialize<'lua> for Binding<'lua> {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: Deserializer<'lua>,
+	{
+		#[derive(Deserialize)]
+		struct BindingFields {
+			keys: Vec<String>,
+			cmd: FunctionWrapper, 
+		}
+
+		#[derive(Deserialize)]
+		struct FunctionWrapper(String);
+
+		let binding_fields: BindingFields = Deserialize::deserialize(deserializer)?;
+		let keys_str_refs: Vec<&str> = binding_fields.keys.iter().map(|s| s.as_str()).collect();
+		let lua = deserializer.lua(); 
+		let cmd: LuaFunction = lua
+			.globals()
+			.get::<_, LuaFunction>(&binding_fields.cmd.0)
+			.map_err(mlua::Error::external)?;
+
+		Ok(Binding {
+			keys: keys_str_refs,
+			cmd,
+		})
+	}
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -112,26 +148,6 @@ impl StrataState {
 
 impl UserData for StrataState {}
 
-impl<'de> Deserialize<'de> for Config {
-    fn deserialize<D>(deserializer: D) -> Result<Config, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let lua_value = Value::deserialize(deserializer)?;
-        let lua = Lua::new();
-
-        // Convert LuaValue to LuaTable
-        let lua_table = match lua_value {
-            Value::Table(table) => table,
-            _ => return Err(D::Error::custom("Invalid Lua table format")),
-        };
-
-        // Convert LuaTable to Config using from_lua function
-        let config = lua.from_lua(lua_table, ())?;
-        Ok(config)
-    }
-}
-
 fn main() -> anyhow::Result<()> {
 	let lua = Lua::new();
 	let config_path =
@@ -147,17 +163,26 @@ fn main() -> anyhow::Result<()> {
 	lua.load(&config_str).exec()?;
 
 	let globals = lua.globals();
-	let config: LuaTable = globals.get("config")?;
+	let config_table: LuaTable = globals.get("config")?;
+	let bindings_table: LuaTable = globals.get("bindings")?;
 
-	let json_str = serde_json::to_string(&config).map_err(mlua::Error::external)?;
-    println!("{}", json_str);
+	let config_str = serde_json::to_string(&config_table).map_err(mlua::Error::external)?;
+	let config: Config = serde_json::from_str(&config_str).map_err(mlua::Error::external)?;
 
-    // Deserialize JSON back into Config struct
-    let config: Config = serde_json::from_str(&json_str).map_err(mlua::Error::external)?;
-    println!("{:#?}", config);
+    let mut bindings: Vec<Binding> = Vec::new();
+    for (_, binding_table) in bindings_table.pairs::<Value, LuaTable>() {
+        let keys: Vec<String> = binding_table.get("keys")?;
+        let cmd: String = binding_table.get("cmd")?;
+        
+        bindings.push(Binding { keys, cmd });
+    }
 
-
-	println!("{:?}", config);
+    // Now you have the bindings as a Rust Vec<Binding>
+    for binding in &bindings {
+        println!("Keys: {:?}, Cmd: {}", binding.keys, binding.cmd);
+    }
+	println!("{:#?}", config);
+	println!("{:#?}", bindings);
 
 	Ok(())
 }
