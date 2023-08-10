@@ -20,8 +20,9 @@ use std::{
 struct StrataState;
 
 impl StrataState {
-	pub fn spawn(cmd: &str) {
-		println!("Launching: {}", cmd);
+	pub fn spawn(_: &Lua, cmd: String) -> LuaResult<()> {
+		println!("Received command: {}", cmd);
+		Ok(())
 	}
 	pub fn set_bindings<'a>(_: &'a Lua, bindings: LuaTable<'a>) -> LuaResult<LuaTable<'a>> {
 		Ok(bindings)
@@ -38,6 +39,7 @@ fn main() -> anyhow::Result<()> {
 	let strata_mod = get_or_create_module(&lua, "strata")?;
 	let cmd_submod = get_or_create_sub_module(&lua, "cmd")?;
 
+	cmd_submod.set("spawn", lua.create_function(StrataState::spawn)?)?;
 	strata_mod.set("set_bindings", lua.create_function(StrataState::set_bindings)?)?;
 
 	lua.load(&config_str).exec()?;
