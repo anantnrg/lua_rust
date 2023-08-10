@@ -39,8 +39,17 @@ fn main() -> anyhow::Result<()> {
 	let strata_mod = get_or_create_module(&lua, "strata")?;
 	let cmd_submod = get_or_create_sub_module(&lua, "cmd")?;
 
+	let set_bindings = lua.create_function_mut(move |_, keybinds: Table| {
+		for binding_table in keybinds.sequence_values::<Table>() {
+			let keys: Vec<String> = binding_table.clone().unwrap().get("keys")?;
+			let cmd: String = binding_table.clone().unwrap().get("cmd")?;
+			println!("Keys: {:?}, Cmd: {}", keys, cmd);
+		}
+		Ok(())
+	})?;
+
 	cmd_submod.set("spawn", lua.create_function(StrataState::spawn)?)?;
-	strata_mod.set("set_bindings", lua.create_function(StrataState::set_bindings)?)?;
+	strata_mod.set("set_bindings", set_bindings)?;
 
 	lua.load(&config_str).exec()?;
 
