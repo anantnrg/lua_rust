@@ -14,9 +14,18 @@ use mlua::{
 use std::{
 	env::var,
 	fs::read_to_string,
+	sync::{
+		Arc,
+		Mutex,
+	},
 };
 
 struct StrataState;
+struct Config;
+
+struct Keybinds<'a> {
+	keybinds: Vec<Keybind<'a>>,
+}
 
 impl StrataState {
 	pub fn spawn(_: &Lua, cmd: String) -> LuaResult<()> {
@@ -25,9 +34,12 @@ impl StrataState {
 	}
 }
 
-struct StrataConfig;
+struct Keybind<'a> {
+	keys: Vec<String>,
+	cmd: LuaFunction<'a>,
+}
 
-impl StrataConfig {
+impl Config {
 	pub fn spawn(lua: &Lua, cmd: String) -> LuaResult<LuaFunction> {
 		let func = lua
 			.load(format!(
@@ -37,20 +49,21 @@ impl StrataConfig {
 				cmd
 			))
 			.into_function()?;
-		// table.set("cmd", cmd)?;
 		Ok(func)
 	}
-	pub fn set_bindings<'a>(_: &'a Lua, bindings: Table<'a>) -> LuaResult<()> {
-		println!("{:#?}", bindings);
+}
+
+impl<'a> Keybinds<'a> {
+	pub fn new() -> Self {
+		Keybinds { keybinds: Vec::new() }
+	}
+
+	pub fn set_bindings(&mut self, lua: &Lua, bindings: Table) -> LuaResult<()> {
 		for key in bindings.sequence_values::<Table>() {
-			// Debug for each settings This should Deserialize to Bindings struct
 			let table: Table = key?.clone();
 			let keys: Vec<String> = table.get("keys")?;
-			let cmd: LuaFunction = table.get("cmd")?;
-			println!("{:#?}", keys);
-			println!("{:#?}", cmd);
-			// Try to call lua functions
-			println!("{:?}", cmd.call(0)?)
+			let cmd: LuaFunction<'static> = table.get("cmd")?;
+			self.keybinds.push(Keybind { keys, cmd });
 		}
 		Ok(())
 	}
@@ -61,18 +74,28 @@ fn main() -> anyhow::Result<()> {
 	let config_path =
 		format!("{}/.config/strata/strata.lua", var("HOME").expect("This should always be set!!!"));
 	let config_str = read_to_string(config_path).unwrap();
+	let keybinds = Arc::new(Mutex::new(Keybinds { keybinds: Vec::new() }));
 
-	// Create a new module
+	// Create the `strata` module
 	let strata_mod = get_or_create_module(&lua, "strata")?;
+	// Create the submodule that holds commonly used commands
 	let cmd_submod = get_or_create_sub_module(&lua, "cmd")?;
+	// Create a separate submodule which is not accessible to the user. this is used to call functions from the rust code
 	let api_submod = get_or_create_sub_module(&lua, "api")?;
 
-	// Create "spawn config" for strata.cmd to construct LuaFunction and use it later.
-	cmd_submod.set("spawn", lua.create_function(StrataConfig::spawn)?)?;
-	// Create "spawn api" for strata.api that can triggers LuaFunction as needed.
+	// Create the function which the user will call from the config.
+	cmd_submod.set("spawn", lua.create_function(Config::spawn)?)?;
+	// Create the function that is called from the Rust code.
 	api_submod.set("spawn", lua.create_function(StrataState::spawn)?)?;
 
-	strata_mod.set("set_bindings", lua.create_function(StrataConfig::set_bindings)?)?;
+	// Create the other functions.
+	strata_mod.set(
+		"set_bindings",
+		lua.create_function(move |_, bindings: Table| {
+			keybinds.clone().lock().unwrap().set_bindings(&lua, bindings)?;
+			Ok(())
+		})?,
+	)?;
 
 	lua.load(&config_str).exec()?;
 
