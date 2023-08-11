@@ -58,11 +58,11 @@ impl<'a> Keybinds<'a> {
 		Keybinds { keybinds: Vec::new() }
 	}
 
-	pub fn set_bindings(&mut self, lua: &Lua, bindings: Table) -> LuaResult<()> {
+	pub fn set_bindings(&mut self, _: &Lua, bindings: Table<'a>) -> LuaResult<()> {
 		for key in bindings.sequence_values::<Table>() {
-			let table: Table = key?.clone();
+			let table: Table<'a> = key?.clone();
 			let keys: Vec<String> = table.get("keys")?;
-			let cmd: LuaFunction<'static> = table.get("cmd")?;
+			let cmd: LuaFunction<'a> = table.get("cmd")?;
 			self.keybinds.push(Keybind { keys, cmd });
 		}
 		Ok(())
@@ -92,7 +92,8 @@ fn main() -> anyhow::Result<()> {
 	strata_mod.set(
 		"set_bindings",
 		lua.create_function(move |_, bindings: Table| {
-			keybinds.clone().lock().unwrap().set_bindings(&lua, bindings)?;
+			let cloned_keybinds = keybinds.clone();
+			cloned_keybinds.lock().unwrap().set_bindings(&lua, bindings)?;
 			Ok(())
 		})?,
 	)?;
