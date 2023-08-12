@@ -9,8 +9,8 @@ use mlua::{
 	prelude::*,
 	Lua,
 	Table,
-	UserData,
-	Value,
+	// UserData,
+	// Value,
 };
 use std::{
 	env::var,
@@ -22,7 +22,8 @@ use std::{
 };
 
 lazy_static! {
-	static ref CONFIG: Arc<Mutex<Config<'static>>> = Arc::new(Mutex::new(Config::default()));
+	static ref CONFIG: Arc<Mutex<Config>> =
+		Arc::new(Mutex::new(Config::default()));
 }
 
 struct StrataState;
@@ -48,12 +49,22 @@ impl StrataConfig {
 		Ok(func)
 	}
 
-	pub fn set_bindings(_: &Lua, bindings: Table) -> LuaResult<()> {
+	pub fn set_bindings(lua: &Lua, bindings: Table) -> LuaResult<()> {
 		for key in bindings.sequence_values::<Table>() {
 			let table: Table = key?.clone();
 			let keys: Vec<String> = table.get("keys")?;
 			let cmd: LuaFunction = table.get("cmd")?;
-			CONFIG.lock().unwrap().bindings.push(Keybinding { keys, func: cmd });
+			let _ = lua
+				.globals()
+				.get::<&str, Table>("package")?
+				.get::<&str, Table>("loaded")?
+				.get::<&str, Table>("strata")?
+				.get::<&str, Table>("bindings")?
+				.set(keys.clone().concat(), cmd)?;
+			CONFIG.lock().unwrap().bindings.push(Keybinding {
+				keys: keys.clone(),
+				func: keys.clone().concat(),
+			});
 		}
 		Ok(())
 	}
@@ -61,8 +72,10 @@ impl StrataConfig {
 
 fn main() -> anyhow::Result<()> {
 	let lua = Lua::new();
-	let config_path =
-		format!("{}/.config/strata/strata.lua", var("HOME").expect("This should always be set!!!"));
+	let config_path = format!(
+		"{}/.config/strata/strata.lua",
+		var("HOME").expect("This should always be set!!!")
+	);
 	let config_str = read_to_string(config_path).unwrap();
 
 	// Create the `strata` module
@@ -71,6 +84,7 @@ fn main() -> anyhow::Result<()> {
 	let cmd_submod = get_or_create_sub_module(&lua, "cmd")?;
 	// Create a separate submodule which is not accessible to the user. this is used to call functions from the rust code
 	let api_submod = get_or_create_sub_module(&lua, "api")?;
+	let _binding_submod = get_or_create_sub_module(&lua, "bindings");
 
 	// Create the function which the user will call from the config.
 	cmd_submod.set("spawn", lua.create_function(StrataConfig::spawn)?)?;
@@ -78,9 +92,23 @@ fn main() -> anyhow::Result<()> {
 	api_submod.set("spawn", lua.create_function(StrataState::spawn)?)?;
 
 	// Create the other functions.
-	strata_mod.set("set_bindings", lua.create_function(StrataConfig::set_bindings)?)?;
+	strata_mod.set(
+		"set_bindings",
+		lua.create_function(StrataConfig::set_bindings)?,
+	)?;
 
 	lua.load(&config_str).exec()?;
+
+	for func in CONFIG.lock().unwrap().bindings.iter() {
+		let cmd = func.func.clone();
+		lua.globals()
+			.get::<&str, Table>("package")?
+			.get::<&str, Table>("loaded")?
+			.get::<&str, Table>("strata")?
+			.get::<&str, Table>("bindings")?
+			.get::<&str, LuaFunction>(&cmd)?
+			.call::<i32, _>(0)?;
+	}
 
 	Ok(())
 }

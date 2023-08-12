@@ -1,4 +1,3 @@
-use mlua::Function;
 use serde_derive::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -54,26 +53,26 @@ pub struct Triggers {
 }
 
 #[derive(Debug, Clone)]
-pub struct Rules<'lua> {
+pub struct Rules {
 	pub triggers: Vec<Triggers>,
-	pub action: Function<'lua>,
+	pub action: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct Keybinding<'lua> {
+pub struct Keybinding {
 	pub keys: Vec<String>,
-	pub func: Function<'lua>,
+	pub func: String,
 }
 
 #[derive(Debug, Default)]
-pub struct Config<'a> {
+pub struct Config {
 	pub autostart: Autostart,
 	pub general: General,
 	pub window_decorations: WindowDecorations,
 	pub tiling: Tiling,
 	pub animations: Animations,
-	pub rules: Vec<Rules<'a>>,
-	pub bindings: Vec<Keybinding<'a>>,
+	pub rules: Vec<Rules>,
+	pub bindings: Vec<Keybinding>,
 }
 
-unsafe impl Send for Config<'static> {}
+unsafe impl Send for Config {}
