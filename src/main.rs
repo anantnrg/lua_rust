@@ -1,5 +1,6 @@
 mod libs;
-
+use crate::libs::config::*;
+use lazy_static::lazy_static;
 use libs::lua::module::{
 	get_or_create_module,
 	get_or_create_sub_module,
@@ -20,12 +21,12 @@ use std::{
 	},
 };
 
-struct StrataState;
-struct Config;
-
-struct Keybinds<'a> {
-	keybinds: Vec<Keybind<'a>>,
+lazy_static! {
+	static ref CONFIG: Arc<Mutex<Config<'static>>> = Arc::new(Mutex::new(Config::default()));
 }
+
+struct StrataState;
+struct StrataConfig;
 
 impl StrataState {
 	pub fn spawn(_: &Lua, cmd: String) -> LuaResult<()> {
@@ -34,12 +35,7 @@ impl StrataState {
 	}
 }
 
-struct Keybind<'a> {
-	keys: Vec<String>,
-	cmd: LuaFunction<'a>,
-}
-
-impl Config {
+impl StrataConfig {
 	pub fn spawn(lua: &Lua, cmd: String) -> LuaResult<LuaFunction> {
 		let func = lua
 			.load(format!(
@@ -51,19 +47,13 @@ impl Config {
 			.into_function()?;
 		Ok(func)
 	}
-}
 
-impl<'a> Keybinds<'a> {
-	pub fn new() -> Self {
-		Keybinds { keybinds: Vec::new() }
-	}
-
-	pub fn set_bindings(&mut self, _: &Lua, bindings: Table<'a>) -> LuaResult<()> {
+	pub fn set_bindings(_: &Lua, bindings: Table) -> LuaResult<()> {
 		for key in bindings.sequence_values::<Table>() {
-			let table: Table<'a> = key?.clone();
+			let table: Table = key?.clone();
 			let keys: Vec<String> = table.get("keys")?;
-			let cmd: LuaFunction<'a> = table.get("cmd")?;
-			self.keybinds.push(Keybind { keys, cmd });
+			let cmd: LuaFunction = table.get("cmd")?;
+			CONFIG.lock().unwrap().bindings.push(Keybinding { keys, func: cmd });
 		}
 		Ok(())
 	}
@@ -74,7 +64,6 @@ fn main() -> anyhow::Result<()> {
 	let config_path =
 		format!("{}/.config/strata/strata.lua", var("HOME").expect("This should always be set!!!"));
 	let config_str = read_to_string(config_path).unwrap();
-	let keybinds = Arc::new(Mutex::new(Keybinds { keybinds: Vec::new() }));
 
 	// Create the `strata` module
 	let strata_mod = get_or_create_module(&lua, "strata")?;
@@ -84,19 +73,12 @@ fn main() -> anyhow::Result<()> {
 	let api_submod = get_or_create_sub_module(&lua, "api")?;
 
 	// Create the function which the user will call from the config.
-	cmd_submod.set("spawn", lua.create_function(Config::spawn)?)?;
+	cmd_submod.set("spawn", lua.create_function(StrataConfig::spawn)?)?;
 	// Create the function that is called from the Rust code.
 	api_submod.set("spawn", lua.create_function(StrataState::spawn)?)?;
 
 	// Create the other functions.
-	strata_mod.set(
-		"set_bindings",
-		lua.create_function(move |_, bindings: Table| {
-			let cloned_keybinds = keybinds.clone();
-			cloned_keybinds.lock().unwrap().set_bindings(&lua, bindings)?;
-			Ok(())
-		})?,
-	)?;
+	strata_mod.set("set_bindings", lua.create_function(StrataConfig::set_bindings)?)?;
 
 	lua.load(&config_str).exec()?;
 
